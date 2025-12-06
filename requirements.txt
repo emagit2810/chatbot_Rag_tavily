@@ -1,27 +1,29 @@
-# Web + API
+# --- Framework Web ---
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-dotenv>=1.0.0
 python-multipart>=0.0.6
 httpx>=0.27.0
 
-# LlamaIndex + LangChain (Sin versiones estrictas para evitar conflictos)
+# --- LlamaIndex & LangChain ---
+# Versiones flexibles para evitar conflictos de dependencias
 llama-index-core
 llama-index-llms-langchain
 llama-index-readers-file
 llama-index-workflows
+llama-index-embeddings-huggingface
 langchain
 langchain-community
 langchain-google-genai
 langchain-huggingface
 langgraph
 
-# Google & Search
+# --- APIs Externas ---
 google-generativeai
 tavily-python
 
-# === TRUCO PARA RENDER: Versiones CPU ===
-# Esto evita que descargue los drivers de NVIDIA
+# --- EXCLUSIVO PARA RENDER: Versiones CPU (Lightweight) ---
+# Esta línea es la que salva tu deploy de morir por memoria RAM
 torch --index-url https://download.pytorch.org/whl/cpu
 transformers
 sentence-transformers
