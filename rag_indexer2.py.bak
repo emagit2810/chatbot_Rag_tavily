@@ -1,0 +1,143 @@
+"""
+RAG minimalista con trazas:
+- Construye y consulta un indice vectorial con embeddings HF.
+- Usa Gemini solo via LangChain (adaptador LangChainLLM) para evitar conflictos de dependencias.
+- Loggea extractos de los fragmentos recuperados para ver que llega al LLM.
+"""
+
+import logging
+import os
+from pathlib import Path
+from typing import Optional
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+from llama_index.llms.langchain import LangChainLLM
+from llama_index.core import (
+    Settings,
+    SimpleDirectoryReader,
+    StorageContext,
+    VectorStoreIndex,
+    load_index_from_storage,
+)
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_DIR = Path(os.getenv("DATA_DIR", PROJECT_ROOT / "data")).resolve()
+STORAGE_DIR = Path(os.getenv("STORAGE_DIR", PROJECT_ROOT / "storage")).resolve()
+
+EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
+DEFAULT_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gemini-2.0-flash-exp")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.3"))
+
+_index: Optional[VectorStoreIndex] = None
+_retriever = None
+
+
+def _ensure_dirs() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _configure_embeddings() -> None:
+    if Settings.embed_model is None:
+        logger.info("[RAG] Cargando embedder HF: %s", EMBED_MODEL_NAME)
+        Settings.embed_model = HuggingFaceEmbedding(model_name=EMBED_MODEL_NAME)
+
+
+def _configure_llm() -> None:
+    """Configura Gemini via LangChain y lo adapta a LlamaIndex."""
+    if Settings.llm is not None:
+        return
+
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        raise RuntimeError("Falta GOOGLE_API_KEY para inicializar Gemini via LangChain.")
+
+    lc_llm = ChatGoogleGenerativeAI(
+        model=LLM_MODEL_NAME,
+        temperature=LLM_TEMPERATURE,
+        google_api_key=api_key,
+    )
+    Settings.llm = LangChainLLM(llm=lc_llm)
+    logger.info("[RAG] LLM Gemini listo via LangChain (modelo=%s, temp=%.2f)", LLM_MODEL_NAME, LLM_TEMPERATURE)
+
+
+def _build_index() -> VectorStoreIndex:
+    logger.info("[RAG] Cargando documentos desde %s", DATA_DIR)
+    documents = SimpleDirectoryReader(str(DATA_DIR), recursive=True).load_data()
+
+    if not documents:
+        logger.warning("[RAG] data/ vacio; el indice se creara vacio.")
+
+    _configure_embeddings()
+    _configure_llm()
+    index = VectorStoreIndex.from_documents(documents)
+    index.storage_context.persist(persist_dir=str(STORAGE_DIR))
+    logger.info("[RAG] Indice creado y persistido en %s", STORAGE_DIR)
+    return index
+
+
+def _load_or_build_index() -> VectorStoreIndex:
+    global _index
+    if _index is not None:
+        return _index
+
+    _ensure_dirs()
+    docstore_path = STORAGE_DIR / "docstore.json"
+
+    if docstore_path.exists():
+        logger.info("[RAG] Cargando indice desde %s", STORAGE_DIR)
+        storage_context = StorageContext.from_defaults(persist_dir=str(STORAGE_DIR))
+        _index = load_index_from_storage(storage_context)
+    else:
+        _index = _build_index()
+
+    return _index
+
+
+def ensure_rag_ready() -> None:
+    """Prepara indice, retriever y LLM una sola vez."""
+    global _retriever
+    _configure_embeddings()
+    _configure_llm()
+    index = _load_or_build_index()
+    if _retriever is None:
+        _retriever = index.as_retriever(similarity_top_k=DEFAULT_TOP_K)
+        logger.info("[RAG] Retriever inicializado (top_k=%d)", DEFAULT_TOP_K)
+
+
+def get_context(question: str, top_k: int = DEFAULT_TOP_K) -> str:
+    """Devuelve texto relevante y deja trazas de los fragmentos elegidos."""
+    ensure_rag_ready()
+
+    if not question or not str(question).strip():
+        return ""
+
+    nodes = _retriever.retrieve(question)
+    texts = [n.text for n in nodes][:top_k]
+
+    if not texts:
+        logger.info("[RAG] No se recuperaron fragmentos para la pregunta.")
+        return ""
+
+    for idx, txt in enumerate(texts, start=1):
+        preview = (txt[:200] + "...") if len(txt) > 200 else txt
+        logger.info("[RAG][ctx %d/%d] %s", idx, len(texts), preview.replace("\n", " "))
+
+    return "\n\n---\n\n".join(texts)
+
+
+def query_rag(question: str, top_k: int = DEFAULT_TOP_K) -> str:
+    """Alias que mantiene compatibilidad: devuelve solo contexto."""
+    return get_context(question, top_k=top_k)
+
+
+def get_paths() -> dict:
+    return {"data": str(DATA_DIR), "storage": str(STORAGE_DIR)}
+
+
+def is_initialized() -> bool:
+    return _retriever is not None

@@ -1,0 +1,57 @@
+# Web + RAG + Gemini deployment bundle para Render.com
+fastapi>=0.123.5
+uvicorn[standard]>=0.38.0
+python-dotenv>=1.2.1
+
+# LlamaIndex + embeddings
+llama-index-core>=0.14.9
+llama-index-embeddings-huggingface>=0.6.1
+llama-index-llms-langchain>=0.7.1
+llama-index-readers-file>=0.5.5
+llama-index-workflows>=2.11.5
+
+# LangChain + LangGraph
+langchain>=1.1.0
+langchain-core>=1.1.0
+langchain-community>=0.4.1
+langchain-google-genai>=3.2.0
+langchain-huggingface>=1.1.0
+langgraph>=1.0.4
+langgraph-sdk>=0.2.12
+langgraph-prebuilt>=1.0.5
+
+# DeepAgents + rates
+deepagents>=0.2.8
+
+# Google AI (sólo por si se usa directamente)
+google-genai>=1.53.0
+
+# Búsqueda web / utilidades
+tavily-python>=0.7.13
+
+# Infra + utilidades
+pydantic>=2.12.5
+pydantic-settings>=2.12.0
+pydantic-core>=2.41.5
+python-multipart>=0.0.6
+typing-extensions>=4.15.0
+
+# Embedding stack
+sentence-transformers>=5.1.2
+torch>=2.9.1
+transformers>=4.57.3
+huggingface-hub>=0.36.0
+
+# Document helpers
+pypdf>=6.4.0
+
+# Logging / HTTP
+httpx>=0.28.1
+requests>=2.32.5
+
+# Optional but recommendados
+uvloop>=0.17.0
+tqdm>=4.67.1
+
+# Lock render to python >=3.11
+python_version >= "3.11"

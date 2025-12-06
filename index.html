@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deep Research Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div class="max-w-4xl mx-auto px-4 py-10 space-y-6">
+    <header class="flex items-center justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-widest text-slate-400">Deep Research Agent</p>
+        <h1 class="text-2xl font-semibold text-white">LLM + RAG + Web Search</h1>
+        <p class="text-sm text-slate-400">Tres modos: LLM only, RAG search y Web search.</p>
+      </div>
+      <span class="text-xs text-slate-500">Backend FastAPI · /chat</span>
+    </header>
+
+    <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-4">
+      <div class="flex flex-col gap-2">
+        <label class="text-sm text-slate-300" for="mode">Modo</label>
+        <select id="mode" class="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100">
+          <option value="llm_only">LLM only</option>
+          <option value="rag_search">RAG search</option>
+          <option value="web_search">Web search</option>
+        </select>
+        <p id="modeHint" class="text-xs text-slate-500">
+          <span id="llmHint">LLM only: respuesta directa del modelo.</span>
+          <span id="ragHint" class="hidden">RAG search: usa contexto de tus documentos locales.</span>
+          <span id="webHint" class="hidden">Web search: consulta limitada en internet.</span>
+        </p>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <label class="text-sm text-slate-300" for="query">Pregunta</label>
+        <textarea id="query" rows="4" placeholder="Escribe tu pregunta aquí..."
+          class="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/50"></textarea>
+      </div>
+
+      <button id="sendBtn"
+        class="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white transition">
+        Enviar
+      </button>
+    </div>
+
+    <div id="status" class="text-xs text-slate-500"></div>
+
+    <section class="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 shadow-xl">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="text-sm font-semibold text-white">Respuesta</h2>
+          <p class="text-xs text-slate-500" id="timestamp"></p>
+        </div>
+        <span id="modeTag" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="answer" class="whitespace-pre-wrap text-slate-100 text-sm"></div>
+      <details id="contextBlock" class="mt-4 hidden">
+        <summary class="text-xs text-slate-400 cursor-pointer">Ver contexto / fuentes</summary>
+        <pre id="context" class="mt-2 bg-slate-800/80 border border-slate-700 rounded p-3 text-xs text-slate-200 whitespace-pre-wrap"></pre>
+      </details>
+    </section>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    const modeSelect = document.getElementById('mode');
+    const queryInput = document.getElementById('query');
+    const sendBtn = document.getElementById('sendBtn');
+    const answerEl = document.getElementById('answer');
+    const statusEl = document.getElementById('status');
+    const modeTag = document.getElementById('modeTag');
+    const contextBlock = document.getElementById('contextBlock');
+    const contextEl = document.getElementById('context');
+    const timestampEl = document.getElementById('timestamp');
+
+    const llmHint = document.getElementById('llmHint');
+    const ragHint = document.getElementById('ragHint');
+    const webHint = document.getElementById('webHint');
+
+    function updateHints() {
+      const mode = modeSelect.value;
+      llmHint.classList.add('hidden');
+      ragHint.classList.add('hidden');
+      webHint.classList.add('hidden');
+      if (mode === 'llm_only') llmHint.classList.remove('hidden');
+      else if (mode === 'rag_search') ragHint.classList.remove('hidden');
+      else if (mode === 'web_search') webHint.classList.remove('hidden');
+    }
+
+    modeSelect.addEventListener('change', updateHints);
+
+    async function loadModes() {
+      try {
+        const res = await fetch(`${API_BASE}/modes`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const modes = (data && data.modes) ? data.modes : [];
+        if (modes.length) {
+          modeSelect.innerHTML = '';
+          modes.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            if (m === 'llm_only') opt.textContent = 'LLM only';
+            else if (m === 'rag_search') opt.textContent = 'RAG search';
+            else if (m === 'web_search') opt.textContent = 'Web search';
+            modeSelect.appendChild(opt);
+          });
+          updateHints();
+        }
+      } catch (e) {
+        console.warn('No se pudo cargar /modes, usando valores por defecto.', e);
+      }
+    }
+
+    async function sendMessage() {
+      const query = queryInput.value.trim();
+      const mode = modeSelect.value;
+      if (!query) {
+        statusEl.textContent = 'La consulta está vacía.';
+        return;
+      }
+
+      sendBtn.disabled = true;
+      statusEl.textContent = 'Enviando...';
+      answerEl.textContent = '';
+      contextBlock.classList.add('hidden');
+      modeTag.textContent = mode;
+      timestampEl.textContent = '';
+
+      try {
+        const res = await fetch(`${API_BASE}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, mode })
+        });
+
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload?.detail || res.statusText);
+        }
+
+        answerEl.textContent = payload.answer || 'Sin respuesta.';
+        modeTag.textContent = payload.mode || mode;
+        timestampEl.textContent = payload.timestamp
+          ? new Date(payload.timestamp).toLocaleString()
+          : '';
+
+        if (payload.context) {
+          contextEl.textContent = payload.context;
+          contextBlock.classList.remove('hidden');
+        } else {
+          contextBlock.classList.add('hidden');
+        }
+        statusEl.textContent = 'Listo.';
+      } catch (err) {
+        answerEl.textContent = `Error: ${err.message || err}`;
+        statusEl.textContent = 'Fallo al consultar el backend.';
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    queryInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        sendMessage();
+      }
+    });
+
+    updateHints();
+    loadModes();
+  </script>
+</body>
+</html>
